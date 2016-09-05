@@ -27,8 +27,6 @@
 		<script src="js/controls/VRControls.js"></script>
 		<script src="js/ViveHydraController.js"></script>
 
-		<script src="js/loaders/OBJLoader.js"></script>
-
 		<script src="js/ConvexObjectBreaker.js"></script>
 		<script src="js/geometries/ConvexGeometry.js"></script>
 
@@ -329,6 +327,7 @@
 					cutSound.setRefDistance( 0.8 );
 
 				});
+				scene.add( cutSound );
 				breakSound = new THREE.PositionalAudio( listener );
 				audioLoader.load( 'sounds/66780__kevinkace__crate-break-4.ogg', function( buffer ) {
 
@@ -336,6 +335,7 @@
 					breakSound.setRefDistance( 0.6 );
 
 				});
+				scene.add( breakSound );
 
 
 				// Lights
