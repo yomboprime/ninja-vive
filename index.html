@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webvr - Ninja</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+		<style>
+			body {
+				font-family: Monospace;
+				background-color: #101010;
+				color: #fff;
+				margin: 0px;
+				overflow: hidden;
+			}
+			a {
+				color: #f00;
+			}
+		</style>
+	</head>
+	<body>
+
+		<script src="build/three.js"></script>
+		<script src="js/libs/ammo.js"></script>
+
+		<script src="js/WebVR.js"></script>
+		<script src="js/effects/VREffect.js"></script>
+		<script src="js/controls/VRControls.js"></script>
+		<script src="js/ViveHydraController.js"></script>
+
+		<script src="js/loaders/OBJLoader.js"></script>
+
+		<script src="js/ConvexObjectBreaker.js"></script>
+		<script src="js/geometries/ConvexGeometry.js"></script>
+
+		<!-- This is the wood visualization vertex shader, copied from the MeshLambertMaterial, simplified and modified: -->
+		<script id="woodVertexShader" type="x-shader/x-vertex">
+
+			#include <shadowmap_pars_vertex>
+
+			uniform vec3 texture3DOffset;
+			uniform mat3 texture3DRotation;
+
+			varying vec3 vModelPosition;
+			varying vec3 vPosition;
+			varying vec3 vNormal;
+
+			void main() {
+
+				#include <begin_vertex>
+
+				vModelPosition = texture3DRotation * ( position + texture3DOffset );
+				vNormal = normalMatrix * normal;
+
+				#include <project_vertex>
+				#include <worldpos_vertex>
+				#include <shadowmap_vertex>
+
+			}
+
+		</script>
+
+		<!-- This is the wood visualization fragment shader, copied from the MeshLambertMaterial, simplified and modified for 3d procedural wood texture: -->
+		<script id="woodFragmentShaderBlock" type="x-shader/x-fragment">
+
+			precision highp float;
+
+			#include <common>
+			#include <packing>
+			#include <bsdfs>
+			#include <lights_pars>
+			#include <shadowmap_pars_fragment>
+
+			uniform float texture3DSize;
+
+			varying vec3 vModelPosition;
+			varying vec3 vPosition;
+			varying vec3 vNormal;
+
+			#define color1 vec3( 0.427, 0.219, 0.094 )
+			#define color2 vec3( 0.745, 0.56, 0.38 )
+
+			//
+			// Description : Array and textureless GLSL 2D/3D/4D simplex
+			//               noise functions.
+			//      Author : Ian McEwan, Ashima Arts.
+			//  Maintainer : stegu
+			//     Lastmod : 20110822 (ijm)
+			//     License : Copyright (C) 2011 Ashima Arts. All rights reserved.
+			//               Distributed under the MIT License. See LICENSE file.
+			//               https://github.com/ashima/webgl-noise
+			//               https://github.com/stegu/webgl-noise
+			//
+
+			vec3 mod289(vec3 x) {
+				return x - floor(x * (1.0 / 289.0)) * 289.0;
+			}
+
+			vec4 mod289(vec4 x) {
+				return x - floor(x * (1.0 / 289.0)) * 289.0;
+			}
+
+			vec4 permute(vec4 x) {
+				return mod289(((x*34.0)+1.0)*x);
+			}
+
+			vec4 taylorInvSqrt(vec4 r)
+			{
+				return 1.79284291400159 - 0.85373472095314 * r;
+			}
+
+			float snoise(vec3 v)
+			{
+				const vec2  C = vec2(1.0/6.0, 1.0/3.0) ;
+				const vec4  D = vec4(0.0, 0.5, 1.0, 2.0);
+
+				// First corner
+				vec3 i  = floor(v + dot(v, C.yyy) );
+				vec3 x0 =   v - i + dot(i, C.xxx) ;
+
+				// Other corners
+				vec3 g = step(x0.yzx, x0.xyz);
+				vec3 l = 1.0 - g;
+				vec3 i1 = min( g.xyz, l.zxy );
+				vec3 i2 = max( g.xyz, l.zxy );
+
+				//   x0 = x0 - 0.0 + 0.0 * C.xxx;
+				//   x1 = x0 - i1  + 1.0 * C.xxx;
+				//   x2 = x0 - i2  + 2.0 * C.xxx;
+				//   x3 = x0 - 1.0 + 3.0 * C.xxx;
+				vec3 x1 = x0 - i1 + C.xxx;
+				vec3 x2 = x0 - i2 + C.yyy; // 2.0*C.x = 1/3 = C.y
+				vec3 x3 = x0 - D.yyy;      // -1.0+3.0*C.x = -0.5 = -D.y
+
+				// Permutations
+				i = mod289(i);
+				vec4 p = permute( permute( permute(
+					 i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
+				       + i.y + vec4(0.0, i1.y, i2.y, 1.0 ))
+				       + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+
+				// Gradients: 7x7 points over a square, mapped onto an octahedron.
+				// The ring size 17*17 = 289 is close to a multiple of 49 (49*6 = 294)
+				float n_ = 0.142857142857; // 1.0/7.0
+				vec3  ns = n_ * D.wyz - D.xzx;
+
+				vec4 j = p - 49.0 * floor(p * ns.z * ns.z);  //  mod(p,7*7)
+
+				vec4 x_ = floor(j * ns.z);
+				vec4 y_ = floor(j - 7.0 * x_ );    // mod(j,N)
+
+				vec4 x = x_ *ns.x + ns.yyyy;
+				vec4 y = y_ *ns.x + ns.yyyy;
+				vec4 h = 1.0 - abs(x) - abs(y);
+
+				vec4 b0 = vec4( x.xy, y.xy );
+				vec4 b1 = vec4( x.zw, y.zw );
+
+				//vec4 s0 = vec4(lessThan(b0,0.0))*2.0 - 1.0;
+				//vec4 s1 = vec4(lessThan(b1,0.0))*2.0 - 1.0;
+				vec4 s0 = floor(b0)*2.0 + 1.0;
+				vec4 s1 = floor(b1)*2.0 + 1.0;
+				vec4 sh = -step(h, vec4(0.0));
+
+				vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+				vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+
+				vec3 p0 = vec3(a0.xy,h.x);
+				vec3 p1 = vec3(a0.zw,h.y);
+				vec3 p2 = vec3(a1.xy,h.z);
+				vec3 p3 = vec3(a1.zw,h.w);
+
+				//  Normalise gradients
+				vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+				p0 *= norm.x;
+				p1 *= norm.y;
+				p2 *= norm.z;
+				p3 *= norm.w;
+
+				// Mix final noise value
+				vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+				m = m * m;
+				return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3) ) );
+			}
+
+			float smoothNoise( vec3 pos, float size ) {
+
+				float multR = 5.0;//size;
+				float mult = 0.025;
+				float r = 0.0;
+				for ( int i = 0; i < 11; i++ ) {
+					r += multR * snoise( mult * pos );
+					multR *= 0.53 + 0.025 * float( i );
+					mult *= 1.99;
+				}
+				return r;
+
+			}
+
+
+			void main() {
+
+				float f = mod( 16.0 * length( vec2( vModelPosition.xz ) ) + 1.5 * smoothNoise( vModelPosition, texture3DSize ), 1.0 );
+				vec3 diffuseColor = mix( color1, color2, f );
+				//vec3 diffuseColor = mix( color1, color2, ( f > 0.5 ? 0.5 - f : f ) );
+
+				vec3 nNormal = normalize( vNormal );
+
+				vec3 lightSum = ambientLightColor;
+
+				for ( int i = 0; i < NUM_DIR_LIGHTS; i++ ) {
+
+					DirectionalLight directionalLight = directionalLights[ i ];
+
+					#ifdef USE_SHADOWMAP
+    
+						float shadow = bool( directionalLight.shadow ) ? getShadow( directionalShadowMap[ i ], directionalLight.shadowMapSize, directionalLight.shadowBias, directionalLight.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;
+
+					#else
+
+						float shadow = 1.0;
+
+					#endif
+
+					vec3 light = max( 0.0, dot( nNormal, directionalLight.direction ) ) * directionalLight.color;
+
+					lightSum += light * shadow;
+
+				}
+
+				gl_FragColor = vec4( diffuseColor * lightSum, 1.0 );
+
+			}
+
+
+		</script>
+
+		<script>
+
+			if ( WEBVR.isLatestAvailable() === false ) {
+
+				document.body.appendChild( WEBVR.getMessage() );
+
+			}
+
+			var clock = new THREE.Clock();
+
+			var container;
+			var camera, scene, renderer;
+			var effect, controls;
+			var controller1, controller2;
+
+			// Physics variables
+			var gravityConstant = 9.8;
+			var collisionConfiguration;
+			var dispatcher;
+			var broadphase;
+			var solver;
+			var physicsWorld;
+			var margin = 0.01;
+
+			// Sound variables
+			var cutSound;
+			var breakSound;
+
+			var convexBreaker = new THREE.ConvexObjectBreaker( 0.15 );
+			var cutPlane = new THREE.Plane();
+			var tempResultObjects = { object1: null, object2: null };
+			var woodMaterial;
+
+			var rigidBodies = [];
+
+			var katanaKinematicBody;
+
+			var nunchakuFirstPose = false;
+			var nunchakuPieces = [];
+			var zeroVector = new THREE.Vector3();
+
+			var pos = new THREE.Vector3();
+			var quat = new THREE.Quaternion();
+			var transformAux1 = new Ammo.btTransform();
+			var tempBtVec3_1 = new Ammo.btVector3( 0, 0, 0 );
+			var tempBtVec3_2 = new Ammo.btVector3( 0, 0, 0 );
+			var tempBtQuat_1 = new Ammo.btQuaternion( 0, 0, 0 );
+
+
+			var tempVec3_1 = new THREE.Vector3();
+			var tempVec3_2 = new THREE.Vector3();
+			var tempVec3_3 = new THREE.Vector3();
+			var tempQuat_1 = new THREE.Quaternion();
+			var tempMatrix4_1 = new THREE.Matrix4();
+
+			var objectsToRemove = [];
+			for ( var i = 0; i < 500; i++ ) {
+			    objectsToRemove[ i ] = null;
+			}
+			var numObjectsToRemove = 0;
+
+			var impactPoint = new THREE.Vector3();
+			var impactNormal = new THREE.Vector3();
+
+			var isVR;
+
+			function init() {
+
+				container = document.createElement( 'div' );
+				document.body.appendChild( container );
+
+				var info = document.createElement( 'div' );
+				info.style.position = 'absolute';
+				info.style.top = '10px';
+				info.style.width = '100%';
+				info.style.textAlign = 'center';
+				info.innerHTML = '<a href="http://threejs.org" target="_blank">three.js</a> webgl - ninja';
+				container.appendChild( info );
+
+				scene = new THREE.Scene();
+
+				camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 10 );
+				scene.add( camera );
+
+				// Sound
+				var listener = new THREE.AudioListener();
+				camera.add( listener );
+				var audioLoader = new THREE.AudioLoader();
+				cutSound = new THREE.PositionalAudio( listener );
+				audioLoader.load( 'sounds/209126__lukesharples__sword-swipe6.ogg', function( buffer ) {
+
+					cutSound.setBuffer( buffer );
+					cutSound.setRefDistance( 0.8 );
+
+				});
+				breakSound = new THREE.PositionalAudio( listener );
+				audioLoader.load( 'sounds/66780__kevinkace__crate-break-4.ogg', function( buffer ) {
+
+					breakSound.setBuffer( buffer );
+					breakSound.setRefDistance( 0.6 );
+
+				});
+
+
+				// Lights
+
+				scene.add( new THREE.AmbientLight( 0xffffff, 0.37 ) );
+
+				var lightSize = 3;
+
+				var light = new THREE.DirectionalLight( 0xffffff );
+				light.position.set( 1.2, 1.3, 1.7 ).multiplyScalar( 5 );
+				light.castShadow = true;
+				light.shadow.camera.left = -lightSize;
+				light.shadow.camera.right = lightSize;
+				light.shadow.camera.top = lightSize;
+				light.shadow.camera.bottom = -lightSize;
+				light.shadow.camera.near = 1;
+				light.shadow.camera.far = 20;
+				light.shadow.mapSize.x = 1024;
+				light.shadow.mapSize.y = 1024;
+				scene.add( light );
+
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setClearColor( 0x505050 );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				renderer.shadowMap.enabled = true;
+				renderer.sortObjects = false;
+				container.appendChild( renderer.domElement );
+
+				initPhysics();
+
+				// vr controls
+
+				controls = new THREE.VRControls( camera );
+				controls.standing = true;
+
+				// controllers
+
+				controller1 = new THREE.ViveHydraController( 0 );
+				controller1.razerHydraBaseOffset.z += 0.5;
+				controller1.standingMatrix = controls.getStandingMatrix();
+				controller1.standingMatrix = new THREE.Matrix4();
+				scene.add( controller1 );
+
+				controller2 = new THREE.ViveHydraController( 1 );
+				controller2.razerHydraBaseOffset.z += 0.5;
+				controller2.standingMatrix = controls.getStandingMatrix();
+				controller2.standingMatrix = new THREE.Matrix4();
+				scene.add( controller2 );
+
+				createObjects();
+
+				effect = new THREE.VREffect( renderer );
+
+				if ( WEBVR.isAvailable() === true ) {
+
+					document.body.appendChild( WEBVR.getButton( effect ) );
+
+					isVR = true;
+
+				}
+				else {
+
+				    	// Set camera position to handle the case of no VR display
+					camera.position.setY( controls.userHeight );
+
+					isVR = false;
+
+				}
+
+				//
+
+				window.addEventListener( 'resize', onWindowResize, false );
+
+			}
+
+			function initPhysics() {
+
+				// Physics configuration
+
+				collisionConfiguration = new Ammo.btDefaultCollisionConfiguration();
+				dispatcher = new Ammo.btCollisionDispatcher( collisionConfiguration );
+				broadphase = new Ammo.btDbvtBroadphase();
+				solver = new Ammo.btSequentialImpulseConstraintSolver();
+				physicsWorld = new Ammo.btDiscreteDynamicsWorld( dispatcher, broadphase, solver, collisionConfiguration );
+				physicsWorld.setGravity( new Ammo.btVector3( 0, - gravityConstant, 0 ) );
+
+			}
+
+			function createObjects() {
+
+			    	// Room
+
+				var roomLength = 8;
+				var roofHeight = 4.5;
+				var wallsWidth = 0.3
+				var tatamiLength = 6;
+				var tatamiHeight = 0.1;
+				var room = new THREE.BoxHelper( new THREE.Box3(
+						new THREE.Vector3( ( - roomLength + wallsWidth ) * 0.5, 0, ( - roomLength + wallsWidth ) * 0.5 ),
+						new THREE.Vector3( ( roomLength - wallsWidth ) * 0.5, roofHeight, ( roomLength - wallsWidth ) * 0.5 ) ), 0x303030 );
+				scene.add( room );
+
+				// Floor
+				pos.set( 0, - wallsWidth * 0.5, 0 );
+				quat.set( 0, 0, 0, 1 );
+				createNonBreakableParalellepiped( roomLength, wallsWidth, roomLength, 0, pos, quat, null );
+
+				// Roof
+				pos.set( 0, roofHeight + wallsWidth * 0.5, 0 );
+				quat.set( 0, 0, 0, 1 );
+				createNonBreakableParalellepiped( roomLength, wallsWidth, roomLength, 0, pos, quat, null );
+
+				// East wall
+				pos.set( roomLength * 0.5, roofHeight * 0.5, 0 );
+				quat.set( 0, 0, 0, 1 );
+				createNonBreakableParalellepiped( wallsWidth, roofHeight, roomLength, 0, pos, quat, null );
+
+				// West wall
+				pos.set( - roomLength * 0.5, roofHeight * 0.5, 0 );
+				quat.set( 0, 0, 0, 1 );
+				createNonBreakableParalellepiped( wallsWidth, roofHeight, roomLength, 0, pos, quat, null );
+
+				// North wall
+				pos.set( 0, roofHeight * 0.5, - roomLength * 0.5 );
+				quat.set( 0, 0, 0, 1 );
+				createNonBreakableParalellepiped( roomLength, roofHeight, wallsWidth, 0, pos, quat, null );
+
+				// South wall
+				pos.set( 0, roofHeight * 0.5, roomLength * 0.5 );
+				quat.set( 0, 0, 0, 1 );
+				createNonBreakableParalellepiped( roomLength, roofHeight, wallsWidth, 0, pos, quat, null );
+
+				// Tatami
+				var tatamiMaterial = new THREE.MeshPhongMaterial( { color: 0x10A030 } );
+				pos.set( 0, tatamiHeight * 0.5, 0 );
+				quat.set( 0, 0, 0, 1 );
+				var tatami = createNonBreakableParalellepiped( tatamiLength, tatamiHeight, tatamiLength, 0, pos, quat, tatamiMaterial );
+				var textureLoader = new THREE.TextureLoader();
+				textureLoader.load( "textures/grid.png", function( texture ) {
+
+				    texture.wrapS = THREE.RepeatWrapping;
+				    texture.wrapT = THREE.RepeatWrapping;
+				    texture.repeat.set( 10, 10 );
+				    tatamiMaterial.map = texture;
+				    tatamiMaterial.needsUpdate = true;
+
+				} );
+
+				// Breakable objects
+
+				var postSize = new THREE.Vector3( 0.11, 1.7, 0.11 );
+
+				tempVec3_1.set( 0.15335, 0.823424, - 0.2421114 );
+				tempMatrix4_1.makeRotationAxis( tempVec3_1, 0.353221 );
+
+				woodMaterial = new THREE.ShaderMaterial( {
+					uniforms: THREE.UniformsUtils.merge( [
+
+        					THREE.UniformsLib['lights'],
+						
+						{
+						        texture3DOffset: { value: new THREE.Vector3( 0, 0, -0.2 ) },
+							//texture3DOffset: { value: new THREE.Vector3( 12, 34, 56 ) },
+							texture3DSize: { value: 10 },
+							texture3DRotation: { value: new THREE.Matrix3().setFromMatrix4( tempMatrix4_1 ) }
+						}
+
+					] ),
+					vertexShader: document.getElementById( 'woodVertexShader' ).textContent,
+					fragmentShader: document.getElementById( 'woodFragmentShaderBlock' ).textContent,
+					lights: true
+				} );
+
+				function createTable( sizeX, sizeY, sizeZ, pos, quat ) {
+
+				    var material = woodMaterial.clone();
+				    material.uniforms.texture3DOffset.value.set( 50 * ( Math.random() - 0.5 ), 50 * ( Math.random() - 0.5 ), 50 * ( Math.random() - 0.5 ) );
+
+				    var obj = createBreakableParalellepiped( sizeX, sizeY, sizeZ, 10, pos, quat, woodMaterial );
+				    
+				    obj.material = material;
+
+				    return obj;
+
+				}
+
+
+				// Sticks
+
+				var l = 0.8;
+				for ( var i = 1; i <= 2; i++ ) {
+
+					for ( j = -2; j <= 2; j++ ) {
+
+
+						if ( j === 0 ) {
+
+							continue;
+
+
+						}
+
+        					pos.set( l * j, tatamiHeight + postSize.y * 0.5, -1 * i );
+						quat.set( 0, 0, 0, 1 );
+						createTable( postSize.x, postSize.y, postSize.z, pos, quat );
+						
+					}
+
+				}
+
+				// Tables
+
+				for ( var i = 1; i <= 2; i++ ) {
+
+					pos.set( - l * 1.5 * ( i === 1 ? 1 : -1 ), tatamiHeight + postSize.y * 0.5, 0 );
+					quat.set( 0, 0, 0, 1 );
+					createTable( postSize.x, postSize.y, 0.6, pos, quat );
+
+				}
+
+				for ( var i = 1; i <= 2; i++ ) {
+
+					pos.set( - l * ( i === 1 ? 1 : -1 ), tatamiHeight + postSize.y * 0.5, 1.8 );
+					quat.set( 0, 0, 0, 1 );
+					createTable( 0.6, postSize.y, postSize.z, pos, quat );
+
+				}
+
+				// The katana
+
+				var katanaShape = new Ammo.btCompoundShape();
+				katanaShape.setMargin( margin );
+
+				tempBtVec3_1.setValue( 0.015 * 0.5, 0.05 * 0.5, 0.88 * 0.5 );
+				var katanaBoxShape = new Ammo.btBoxShape( tempBtVec3_1 );
+
+				tempBtVec3_1.setValue( 0, 0.015, - 0.5 );
+				tempVec3_1.set( 1, 0, 0 );
+				quat.setFromAxisAngle( tempVec3_1, 0.035 );
+				tempBtQuat_1.setValue( quat.x, quat.y, quat.z, quat.w );
+
+				transformAux1.setOrigin( tempBtVec3_1 );
+				transformAux1.setRotation( tempBtQuat_1 );
+				katanaShape.addChildShape( transformAux1, katanaBoxShape );
+
+				pos.set( 0, 0, 0 );
+				quat.set( 0, 0, 0, 1 );
+				katanaKinematicBody = createRigidBody( null, katanaShape, 0, pos, quat, undefined, undefined, 4, ~ ( 2 + 4 ) );
+				// Kinematic body
+				katanaKinematicBody.setCollisionFlags( katanaKinematicBody.getCollisionFlags() | 2 );
+				// Disable deactivation
+				katanaKinematicBody.setActivationState( 4 );
+
+				controller1.userData.kinematicBody = katanaKinematicBody;
+
+				// Load katana model
+				var objectLoader = new THREE.ObjectLoader();
+				objectLoader.load( 'models/json/katana/katana_HH.json', function ( object ) {
+
+					controller1.add( object );
+
+				} );
+
+				// The nunchaku
+				var nunchakuRadius = 0.025;
+				var nunchakuLength = 0.32;
+				var nunchakuSegments = 3;
+				var nunchakuSegmentLength = 0.08;
+				var nunchakuSegmentWidth = 0.018;
+
+				var nunchakuWoodMaterial = new THREE.MeshPhongMaterial();
+				var nunchakuMetalMaterial = new THREE.MeshPhongMaterial( { color: 0xA0A0B0 } );
+
+				textureLoader.load( "textures/hardwood2_diffuse.jpg", function( texture ) {
+
+				    nunchakuWoodMaterial.map = texture;
+				    nunchakuWoodMaterial.needsUpdate = true;
+
+				} );
+
+				textureLoader.load( "textures/hardwood2_bump.jpg", function( texture ) {
+
+				    nunchakuWoodMaterial.bumpMap = texture;
+				    nunchakuWoodMaterial.bumpScale = 0.02;
+				    nunchakuWoodMaterial.needsUpdate = true;
+
+				} );
+
+				function createNunchakuCylinder() {
+
+					tempBtVec3_1.setValue( nunchakuRadius, nunchakuLength * 0.5, nunchakuRadius );
+					var nunchakuCylinderShape = new Ammo.btCylinderShapeZ( tempBtVec3_1 );
+					nunchakuCylinderShape.setMargin( 0.001 );
+					return nunchakuCylinderShape;
+
+				}
+
+				function createNunchakuVisualCylinder( lastOne ) {
+
+					var last = lastOne ? 1 : - 1;
+
+					tempVec3_1.set( 1, 0, 0 );
+					tempQuat_1.setFromAxisAngle( tempVec3_1, last * Math.PI * 0.5 );
+					tempMatrix4_1.makeRotationFromQuaternion( tempQuat_1 );
+					var nunchakuGeometry = new THREE.CylinderBufferGeometry( nunchakuRadius, nunchakuRadius, nunchakuLength, 12, 1  ).applyMatrix( tempMatrix4_1 );
+					var nunchakuVisual = new THREE.Mesh( nunchakuGeometry, nunchakuWoodMaterial );
+					nunchakuVisual.castShadow = true;
+					nunchakuVisual.receiveShadow = true;
+
+					var linkGeometry = new THREE.TorusBufferGeometry( nunchakuSegmentLength * 0.6, nunchakuSegmentLength * 0.1, 10, 16, Math.PI ).applyMatrix( tempMatrix4_1 );
+					var link = new THREE.Mesh( linkGeometry, nunchakuMetalMaterial );
+					link.castShadow = true;
+					link.receiveShadow = true;
+					link.scale.set( 0.4, 0.4, 1 );
+					link.position.setZ( nunchakuLength * 0.5 * last );
+					nunchakuVisual.add( link );
+
+					return nunchakuVisual;
+
+				}
+
+				function createNunchakuLink( mass, pos, quat ) {
+
+					tempVec3_1.set( 1, 0, 0 );
+					tempQuat_1.setFromAxisAngle( tempVec3_1, Math.PI * 0.5 );
+					tempMatrix4_1.makeRotationFromQuaternion( tempQuat_1 );
+
+					var linkGeometry = new THREE.TorusBufferGeometry( nunchakuSegmentLength * 0.6, nunchakuSegmentLength * 0.1, 10, 16 ).applyMatrix( tempMatrix4_1 );
+					var link = new THREE.Mesh( linkGeometry, nunchakuMetalMaterial );
+					link.castShadow = true;
+					link.receiveShadow = true;
+					link.scale.set( 0.4, 0.4, 1 );
+
+					tempBtVec3_1.setValue( nunchakuSegmentWidth, nunchakuSegmentWidth, nunchakuSegmentLength );
+					var shape = new Ammo.btBoxShape( tempBtVec3_1 );
+					shape.setMargin( margin );
+
+					createRigidBody( link, shape, mass, pos, quat );
+
+					return link;
+
+				}
+
+
+				var nunchakuShape = createNunchakuCylinder();
+
+				pos.set( 1, 1, 0 );
+				quat.set( 0, 0, 0, 1 );
+				var nunchakuKinematicBody = createRigidBody( null, nunchakuShape, 0, pos, quat, undefined, undefined, 4, ~ ( 2 + 4 ) );
+				// Kinematic body
+				nunchakuKinematicBody.setCollisionFlags( nunchakuKinematicBody.getCollisionFlags() | 2 );
+				// Disable deactivation
+				nunchakuKinematicBody.setActivationState( 4 );
+
+				var nunchakuVisual = createNunchakuVisualCylinder( false );
+				controller2.add( nunchakuVisual );
+				controller2.userData.kinematicBody = nunchakuKinematicBody;
+
+				// Rest of the nunchaku
+				var previousSegmentBody = nunchakuKinematicBody;
+
+				pos.set( 1, 1, - nunchakuLength * 0.5 );
+				quat.set( 0, 0, 0, 1 );
+
+				for ( var i = 0; i < nunchakuSegments + 1; i++ ) {
+
+					var lastOne = i === nunchakuSegments;
+
+					var nunchakuSegment = null;
+
+					if ( lastOne ) {
+
+						pos.z -= nunchakuLength * 0.5 + nunchakuSegmentLength;
+						tempVec3_3.set( 0, 0, ( nunchakuLength + nunchakuSegmentLength ) * 0.5 );
+						tempVec3_2.set( 0, 0, - nunchakuSegmentLength * 0.5 );
+
+
+						nunchakuSegment = createNunchakuVisualCylinder( true );
+						var nunchakuShape2 = createNunchakuCylinder();
+						createRigidBody( nunchakuSegment, nunchakuShape2, 1, pos, quat );
+
+					}
+					else {
+
+						pos.z -= nunchakuSegmentLength;
+						tempVec3_3.set( 0, 0, nunchakuSegmentLength * 0.5 );
+
+						if ( i === 0 ) {
+
+						    tempVec3_2.set( 0, 0, - ( nunchakuLength + nunchakuSegmentLength ) * 0.5 );
+
+						}
+						else {
+
+						    tempVec3_2.set( 0, 0, - nunchakuSegmentLength * 0.5 );
+
+						}
+
+						nunchakuSegment = createNunchakuLink( 0.5, pos, quat );
+
+					}
+
+					nunchakuSegment.userData.physicsBody.setDamping( 0.8, 0.8 );
+
+					tempBtVec3_1.setValue( tempVec3_2.x, tempVec3_2.y, tempVec3_2.z );
+					tempBtVec3_2.setValue( tempVec3_3.x, tempVec3_3.y, tempVec3_3.z );
+
+					var segmentConstraint = new Ammo.btPoint2PointConstraint( previousSegmentBody, nunchakuSegment.userData.physicsBody, tempBtVec3_1, tempBtVec3_2 );
+					physicsWorld.addConstraint( segmentConstraint, true );
+
+					previousSegmentBody = nunchakuSegment.userData.physicsBody;
+
+					nunchakuPieces.push( nunchakuSegment );
+
+				}
+
+
+			}
+
+			function createBreakableParalellepiped( sx, sy, sz, mass, pos, quat, material ) {
+
+				var object = new THREE.Mesh( new THREE.BoxGeometry( sx, sy, sz ), material );
+				object.castShadow = true;
+				object.receiveShadow = true;
+				object.position.copy( pos );
+				object.quaternion.copy( quat );
+				convexBreaker.prepareBreakableObject( object, mass, new THREE.Vector3(), new THREE.Vector3(), true );
+				createDebrisFromBreakableObject( object );
+
+				return object;
+
+			}
+
+			function createNonBreakableParalellepiped( sx, sy, sz, mass, pos, quat, material ) {
+
+				var object = null;
+				if ( material ) {
+					object = new THREE.Mesh( new THREE.BoxGeometry( sx, sy, sz, 1, 1, 1 ), material );
+					object.castShadow = true;
+					object.receiveShadow = true;
+				}
+				var shape = new Ammo.btBoxShape( new Ammo.btVector3( sx * 0.5, sy * 0.5, sz * 0.5 ) );
+				shape.setMargin( margin );
+
+				createRigidBody( object, shape, mass, pos, quat );
+
+				return object;
+
+			}
+
+			function createDebrisFromBreakableObject( object ) {
+
+				var shape = createConvexHullPhysicsShape( object.geometry.vertices );
+				shape.setMargin( margin );
+
+				var body = createRigidBody( object, shape, object.userData.mass, null, null, object.userData.velocity, object.userData.angularVelocity );
+
+				// Set pointer back to the three object only in the debris objects
+				var btVecUserData = new Ammo.btVector3( 0, 0, 0 );
+				btVecUserData.threeObject = object;
+				body.setUserPointer( btVecUserData );
+
+				return body;
+
+			}
+
+			function removeDebris( object ) {
+
+				scene.remove( object );
+
+				physicsWorld.removeRigidBody( object.userData.physicsBody );
+
+			}
+
+			function createConvexHullPhysicsShape( points ) {
+
+				var shape = new Ammo.btConvexHullShape();
+
+				for ( var i = 0, il = points.length; i < il; i++ ) {
+					var p = points[ i ];
+					this.tempBtVec3_1.setValue( p.x, p.y, p.z );
+					var lastOne = ( i === ( il - 1 ) );
+					shape.addPoint( this.tempBtVec3_1, lastOne );
+				}
+
+				return shape;
+
+			}
+
+			function createRigidBody( object, physicsShape, mass, pos, quat, vel, angVel, collisionGroup, collisionMask ) {
+
+				if ( collisionGroup === undefined ) {
+
+				    collisionGroup = -1;
+
+				}
+
+				if ( collisionMask === undefined ) {
+
+				    collisionMask = -1;
+
+				}
+
+				if ( object ) {
+					if ( pos ) {
+					    object.position.copy( pos );
+					}
+					else {
+					    pos = object.position;
+					}
+					if ( quat ) {
+					    object.quaternion.copy( quat );
+					}
+					else {
+					    quat = object.quaternion;
+					}
+				}
+
+				var transform = new Ammo.btTransform();
+				transform.setIdentity();
+				transform.setOrigin( new Ammo.btVector3( pos.x, pos.y, pos.z ) );
+				transform.setRotation( new Ammo.btQuaternion( quat.x, quat.y, quat.z, quat.w ) );
+				var motionState = new Ammo.btDefaultMotionState( transform );
+
+				var localInertia = new Ammo.btVector3( 0, 0, 0 );
+				physicsShape.calculateLocalInertia( mass, localInertia );
+
+				var rbInfo = new Ammo.btRigidBodyConstructionInfo( mass, motionState, physicsShape, localInertia );
+				var body = new Ammo.btRigidBody( rbInfo );
+
+				body.setFriction( 0.5 );
+
+				if ( vel ) {
+				    body.setLinearVelocity( new Ammo.btVector3( vel.x, vel.y, vel.z ) );
+				}
+				if ( angVel ) {
+				    body.setAngularVelocity( new Ammo.btVector3( angVel.x, angVel.y, angVel.z ) );
+				}
+
+				if ( object ) {
+
+				    object.userData.physicsBody = body;
+				    object.userData.collided = false;
+
+				    scene.add( object );
+
+				}
+
+				if ( mass > 0 ) {
+
+					rigidBodies.push( object );
+
+				}
+
+				physicsWorld.addRigidBody( body, collisionGroup, collisionMask );
+
+				return body;
+			}
+
+			function createRandomColor() {
+				return Math.floor( Math.random() * ( 1 << 24 ) );
+			}
+
+			function createMaterial( color ) {
+				color = color || createRandomColor();
+				return new THREE.MeshPhongMaterial( { color: color } );
+			}
+
+			
+
+			var handleController = function() {
+
+				return function handleController( controller, id, deltaTime ) {
+
+					controller.update();
+
+					var gamepad = controller.getGamepad();
+
+					if ( gamepad ) {
+
+						var kinematicBody = controller.userData.kinematicBody;
+						if ( kinematicBody ) {
+
+						    var ms = kinematicBody.getMotionState();
+						    if ( ms ) {
+
+							var p = controller.position;
+							tempBtVec3_1.setValue( p.x, p.y, p.z );
+							var q = controller.quaternion;
+							tempBtQuat_1.setValue( q.x, q.y, q.z, q.w );
+							transformAux1.setOrigin( tempBtVec3_1 );
+							transformAux1.setRotation( tempBtQuat_1 );
+
+							ms.setWorldTransform( transformAux1 );
+
+						    }
+
+						}
+
+						if ( ! isVR ) {
+
+						    if ( gamepad.buttons[ 4 ].pressed ) {
+
+							// Camera left
+							tempVec3_1.set( 0, 1, 0 );
+							tempQuat_1.setFromAxisAngle( tempVec3_1, deltaTime * 2.4 );
+							camera.quaternion.multiply( tempQuat_1 );
+
+						    }
+
+						    if ( gamepad.buttons[ 5 ].pressed ) {
+
+							// Camera right
+							tempVec3_1.set( 0, 1, 0 );
+							tempQuat_1.setFromAxisAngle( tempVec3_1, - deltaTime * 2.4 );
+							camera.quaternion.multiply( tempQuat_1 );
+
+						    }
+
+						}
+
+					}
+
+				}
+
+			}();
+
+			function playSound( sound, pointSource ) {
+
+				if ( ! sound.isPlaying ) {
+
+					sound.position.copy( pointSource );
+					sound.play();
+
+				}
+
+			}
+
+			function updatePhysics( deltaTime ) {
+
+				function setParentMaterial( parent, child ) {
+
+					child.material = woodMaterial.clone();
+					child.material.uniforms.texture3DOffset.value
+						.subVectors( child.position, parent.position )
+						.add( parent.material.uniforms.texture3DOffset.value );
+
+				}
+
+				// Step world
+				physicsWorld.stepSimulation( deltaTime, 10 );
+
+				// Update rigid bodies
+				for ( var i = 0, il = rigidBodies.length; i < il; i++ ) {
+					var objThree = rigidBodies[ i ];
+					var objPhys = objThree.userData.physicsBody;
+					var ms = objPhys.getMotionState();
+					if ( ms ) {
+
+						ms.getWorldTransform( transformAux1 );
+						var p = transformAux1.getOrigin();
+						var q = transformAux1.getRotation();
+						objThree.position.set( p.x(), p.y(), p.z() );
+						objThree.quaternion.set( q.x(), q.y(), q.z(), q.w() );
+
+						objThree.userData.collided = false;
+
+					}
+				}
+
+				for ( var i = 0, il = dispatcher.getNumManifolds(); i < il; i ++ ) {
+
+					var contactManifold = dispatcher.getManifoldByIndexInternal( i );
+					// Need cast to obtain the same rigid body and not the collision body ancestor Ammo object
+					var rb0 = Ammo.castObject( contactManifold.getBody0(), Ammo.btRigidBody );
+					var rb1 = Ammo.castObject( contactManifold.getBody1(), Ammo.btRigidBody );
+
+					var threeObject0 = Ammo.castObject( rb0.getUserPointer(), Ammo.btVector3 ).threeObject;
+					var threeObject1 = Ammo.castObject( rb1.getUserPointer(), Ammo.btVector3 ).threeObject;
+
+					if ( ! threeObject0 && ! threeObject1 ) {
+						continue;
+					}
+
+					var userData0 = threeObject0 ? threeObject0.userData : null;
+					var userData1 = threeObject1 ? threeObject1.userData : null;
+
+					var breakable0 = userData0 ? userData0.breakable : false;
+					var breakable1 = userData1 ? userData1.breakable : false;
+
+					var collided0 = userData0 ? userData0.collided : false;
+					var collided1 = userData1 ? userData1.collided : false;
+
+					if ( ( ! breakable0 && ! breakable1 ) || ( collided0 && collided1 ) ) {
+						continue;
+					}
+
+					var contact = false;
+					var maxImpulse = 0;
+					for ( var j = 0, jl = contactManifold.getNumContacts(); j < jl; j ++ ) {
+						var contactPoint = contactManifold.getContactPoint( j );
+						if ( contactPoint.getDistance() < 0 ) {
+							contact = true;
+							var impulse = contactPoint.getAppliedImpulse();
+							if ( impulse > maxImpulse ) {
+								maxImpulse = impulse;
+								var pos = contactPoint.get_m_positionWorldOnB();
+								var normal = contactPoint.get_m_normalWorldOnB();
+								impactPoint.set( pos.x(), pos.y(), pos.z() );
+								impactNormal.set( normal.x(), normal.y(), normal.z() );
+							}
+							break;
+						}
+					}
+
+					// If no point has contact, abort
+					if ( ! contact ) {
+						continue;
+					}
+
+					// The katana always cuts. Otherwise do breaking
+					var doCut = ( katanaKinematicBody === rb0 ) || ( katanaKinematicBody === rb1 );
+
+					var fractureImpulse = 3;
+
+					if ( breakable0 && ! collided0 && maxImpulse > fractureImpulse ) {
+
+						if ( doCut ) {
+
+							tempVec3_1.setFromMatrixColumn( controller1.matrixWorld, 0 );
+							cutPlane.setFromNormalAndCoplanarPoint( tempVec3_1, impactPoint );
+
+							convexBreaker.cutByPlane( threeObject0, cutPlane, tempResultObjects );
+
+							var obj1 = tempResultObjects.object1;
+							var obj2 = tempResultObjects.object2;
+
+							if ( obj1 ) {
+
+							    setParentMaterial( threeObject0, obj1 );
+
+							    createDebrisFromBreakableObject( obj1 );
+							    obj1.castShadow = true;
+							    obj1.receiveShadow = true;
+
+							}
+
+							if ( obj2 ) {
+
+							    setParentMaterial( threeObject0, obj2 );
+
+							    createDebrisFromBreakableObject( obj2);
+							    obj2.castShadow = true;
+							    obj2.receiveShadow = true;
+
+							}
+
+							playSound( cutSound, impactPoint );
+
+						}
+						else {
+
+						    var debris = convexBreaker.subdivideByImpact( threeObject0, impactPoint, impactNormal , 1, 2, 1.5 );
+
+						    var numObjects = debris.length;
+						    for ( var j = 0; j < numObjects; j++ ) {
+
+							    var obj = debris[ j ];
+
+							    setParentMaterial( threeObject0, obj );
+
+							    createDebrisFromBreakableObject( obj );
+
+							    obj.castShadow = true;
+							    obj.receiveShadow = true;
+
+
+						    }
+
+						    playSound( breakSound, impactPoint );
+
+						}
+
+						objectsToRemove[ numObjectsToRemove++ ] = threeObject0;
+						userData0.collided = true;
+
+					}
+
+					if ( breakable1 && ! collided1 && maxImpulse > fractureImpulse ) {
+
+						if ( doCut ) {
+
+							tempVec3_1.setFromMatrixColumn( controller1.matrixWorld, 0 );
+							cutPlane.setFromNormalAndCoplanarPoint( tempVec3_1, impactPoint );
+
+							convexBreaker.cutByPlane( threeObject1, cutPlane, tempResultObjects );
+
+							var obj1 = tempResultObjects.object1;
+							var obj2 = tempResultObjects.object2;
+
+							if ( obj1 ) {
+
+							    setParentMaterial( threeObject1, obj1 );
+
+							    createDebrisFromBreakableObject( obj1 );
+							    obj1.castShadow = true;
+							    obj1.receiveShadow = true;
+
+							}
+
+							if ( obj2 ) {
+
+							    setParentMaterial( threeObject1, obj2 );
+
+							    createDebrisFromBreakableObject( obj2);
+							    obj2.castShadow = true;
+							    obj2.receiveShadow = true;
+
+							}
+
+							playSound( cutSound, impactPoint );
+
+						}
+						else {
+
+						    var debris = convexBreaker.subdivideByImpact( threeObject1, impactPoint, impactNormal , 1, 2, 1.5 );
+
+						    var numObjects = debris.length;
+						    for ( var j = 0; j < numObjects; j++ ) {
+
+							    var obj = debris[ j ];
+
+							    setParentMaterial( threeObject1, obj );
+
+							    createDebrisFromBreakableObject( obj );
+
+							    obj.castShadow = true;
+							    obj.receiveShadow = true;
+
+						    }
+
+						    playSound( breakSound, impactPoint );
+
+						}
+
+						objectsToRemove[ numObjectsToRemove++ ] = threeObject1;
+						userData1.collided = true;
+
+					}
+
+				}
+
+				for ( var i = 0; i < numObjectsToRemove; i++ ) {
+
+				    removeDebris( objectsToRemove[ i ] );
+
+				}
+				numObjectsToRemove = 0;
+
+			}
+
+			function onWindowResize() {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				effect.setSize( window.innerWidth, window.innerHeight );
+
+			}
+
+			//
+
+			function animate() {
+
+				effect.requestAnimationFrame( animate );
+				render();
+
+			}
+
+			function render() {
+
+				var deltaTime = clock.getDelta();
+
+				handleController( controller1, 0, deltaTime );
+
+				handleController( controller2, 1, deltaTime );
+				
+				updatePhysics( deltaTime );
+
+				controls.update();
+
+				effect.render( scene, camera );
+
+			}
+
+			init();
+			animate();
+
+		</script>
+	</body>
+</html>
