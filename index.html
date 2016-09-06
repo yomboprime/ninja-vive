@@ -13,7 +13,7 @@
 				overflow: hidden;
 			}
 			a {
-				color: #f00;
+				color: #0ff;
 			}
 		</style>
 	</head>
@@ -308,7 +308,9 @@
 				info.style.top = '10px';
 				info.style.width = '100%';
 				info.style.textAlign = 'center';
-				info.innerHTML = '<a href="http://threejs.org" target="_blank">three.js</a> webgl - ninja';
+				info.innerHTML = '<a href="http://threejs.org" target="_blank">three.js</a> webgl - ninja<br>' +
+					'Katana model by <a href="https://yomboprime.github.io/ninja-vive/models/json/katana/license.txt">Render-Man</a>' +
+					', sounds by <a href="https://yomboprime.github.io/ninja-vive/sounds/readme.txt">Luke Sharples and kevinkace</a>';
 				container.appendChild( info );
 
 				scene = new THREE.Scene();
@@ -377,13 +379,11 @@
 				controller1 = new THREE.ViveHydraController( 0 );
 				controller1.razerHydraBaseOffset.z += 0.5;
 				controller1.standingMatrix = controls.getStandingMatrix();
-				controller1.standingMatrix = new THREE.Matrix4();
 				scene.add( controller1 );
 
 				controller2 = new THREE.ViveHydraController( 1 );
 				controller2.razerHydraBaseOffset.z += 0.5;
 				controller2.standingMatrix = controls.getStandingMatrix();
-				controller2.standingMatrix = new THREE.Matrix4();
 				scene.add( controller2 );
 
 				createObjects();
